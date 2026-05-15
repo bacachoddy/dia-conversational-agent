@@ -20,8 +20,8 @@ COLLECTION_NAME = "rag_collection"
 BACKEND_URL = "http://localhost:8001"
 
 LLM_CONFIG = {
-    "model": "llama3.1:8b",
-    "base_url": "http://100.114.130.128:5000/v1",
+    "model": "cyankiwi/Qwen3.5-27B-AWQ-4bit",
+    "base_url": "http://100.102.206.64:8005/v1",
     "api_key": "not_required",
     "temperature": 0.7
 }
@@ -143,6 +143,19 @@ def generate_evaluation_dataset(n: int = 20):
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an academic evaluator for RAG systems. Your task is to generate high-quality QA pairs in Spanish.
 
+        You MUST generate output that strictly follows the provided schema.
+
+        CRITICAL RULES:
+        - Return ONLY the structured object.
+        - Do NOT include explanations.
+        - Do NOT include markdown.
+        - All required fields must be present.
+        - All enum fields must contain valid allowed values only.
+        - language must always be a 2-letter ISO code.
+        - contexts and reference_contexts must always be arrays.
+        - question and ground_truth must be written in Spanish.
+        - questions that students, teachers, etc. would ask in real life
+
         STRICT FORMAT RULES:
         1. language: Use ONLY two-letter ISO codes (e.g., 'es', 'en').
         2. generation_method: Always use 'llm_generated'.
@@ -213,9 +226,9 @@ def generate_evaluation_dataset(n: int = 20):
 
 if __name__ == "__main__":
     # Generate X samples
-    data = generate_evaluation_dataset(100)
+    data = generate_evaluation_dataset(3)
     if data:
-        output_file = "rag_dataset_v3.json"
+        output_file = "rag_dataset_v3_gemma_nvidia_V2.json"
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
         print(f"Done! Dataset saved to {output_file}")

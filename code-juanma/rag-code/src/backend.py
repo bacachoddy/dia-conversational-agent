@@ -9,11 +9,11 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from pydantic import BaseModel
 import chromadb
 from minio import Minio
-
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 
 # --- LangChain Imports ---
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -29,25 +29,42 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions
 from docling.chunking import HybridChunker
 
+
 app = FastAPI(title="RAG DIA")
 
 # --- 1. Initialization ---
 print("Initializing FastAPI backend...")
 
-ollama_url = "http://100.83.251.20:5000" 
+#ollama_url = "http://100.120.214.59:11434" 
+vllm_url = "http://100.73.42.55" 
 
 # LLM Local / Cluster
-llm = ChatOpenAI(
+"""llm = ChatOpenAI(
     model="qwen2.5:32b", 
     base_url=ollama_url + "/v1",
     api_key="not_required",
     temperature=0.1
+)"""
+
+#vllm
+llm = ChatOpenAI(
+    model="cyankiwi/Qwen3.5-27B-AWQ-4bit", 
+    base_url=vllm_url + ":8005/v1",
+    api_key="not_required",
+    temperature=0.05
 )
 
 # Embeddings (cluster)
-embeddings = OllamaEmbeddings(
-    model="qwen3-embedding:8b",
+"""embeddings = OllamaEmbeddings(
+    model="bge-m3:latest",
     base_url=ollama_url
+)"""
+
+# vllm
+embeddings = OpenAIEmbeddings(
+    model="BAAI/bge-m3",
+    base_url=vllm_url + ":8000/v1",
+    api_key="not_required"
 )
 
 # ChromaDB client
@@ -88,6 +105,10 @@ def init_db():
                   history TEXT, 
                   selected_context TEXT, 
                   last_docs TEXT)''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS processed_files
+                 (file_id TEXT PRIMARY KEY)''')
+
     conn.commit()
     conn.close()
 
@@ -123,9 +144,40 @@ def save_session(session_id: str, session_data: dict):
     conn.commit()
     conn.close()
 
+def get_all_processed_files():
+    """Get all processed files from the database."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT file_id FROM processed_files")
+    files = [row[0] for row in c.fetchall()]
+    conn.close()
+    return files
 
-# --- Variables ---
-processed_files = set()
+def is_file_processed(file_id: str) -> bool:
+    """Check if a file is already processed."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM processed_files WHERE file_id=?", (file_id,))
+    result = c.fetchone()
+    conn.close()
+    return result is not None
+
+def add_processed_file(file_id: str):
+    """Add a processed file to the database."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO processed_files (file_id) VALUES (?)", (file_id,))
+    conn.commit()
+    conn.close()
+
+def remove_processed_file(file_id: str):
+    """Remove a processed file from the database."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("DELETE FROM processed_files WHERE file_id=?", (file_id,))
+    conn.commit()
+    conn.close()
+
 
 # --- Pydantic model ---
 class ContextItem(BaseModel):
@@ -195,7 +247,7 @@ async def get_available_files():
             if c not in hierarchy: hierarchy[c] = {}
             if g not in hierarchy[c]: hierarchy[c][g] = set()
             
-            # Add the filename with a prefix to indicate its degree (e.g., [Bachelor], [Master])
+            # Add the filename with a prefix to indicate its degree
             display_name = f"[{c}] {s}"
             hierarchy[c][g].add(display_name)
 
@@ -220,7 +272,7 @@ async def process_files(
     Processes uploaded files and attaches hierarchical metadata.
     'Optional' and default values.
     """
-    global processed_files
+
     new_docs = []
     new_filenames = []
     os.makedirs("temp_uploads", exist_ok=True)
@@ -234,7 +286,8 @@ async def process_files(
         
         unique_file_id = f"{effective_course}_{effective_degree}_{filename}"
         
-        if unique_file_id in processed_files:
+        if is_file_processed(unique_file_id):
+            print(f"File already processed: {filename}")
             continue 
 
         temp_path = os.path.join("temp_uploads", filename)
@@ -253,7 +306,7 @@ async def process_files(
             print(f"PDF uploaded to MinIO: {object_name}")
 
             pipeline_options = PdfPipelineOptions()
-            pipeline_options.do_ocr = True 
+            pipeline_options.do_ocr = False 
             pipeline_options.ocr_options = EasyOcrOptions() 
             
             doc_converter = DocumentConverter(
@@ -291,7 +344,7 @@ async def process_files(
             
             new_docs.extend(splits)
             new_filenames.append(filename)
-            processed_files.add(unique_file_id)
+            add_processed_file(unique_file_id)
             
         except Exception as e:
             print(f"Error processing {filename}: {str(e)}")
@@ -310,7 +363,7 @@ async def process_files(
     else:
         status_message = "No new files were added (they might already exist)."
 
-    return {"processed_files": list(processed_files), "status_message": status_message}
+    return {"processed_files": list(get_all_processed_files()), "status_message": status_message}
 
 @app.post("/delete_file")
 async def delete_file_from_db(
@@ -321,6 +374,7 @@ async def delete_file_from_db(
     """Delete a file from MinIO and ChromaDB"""
     try:
         object_name = f"{course}/{degree}/{filename}"
+        unique_file_id = f"{course}_{degree}_{filename}"
         
         try:
             minio_client.stat_object(MINIO_BUCKET, object_name)
@@ -343,7 +397,9 @@ async def delete_file_from_db(
             msg = f"Success: {len(chunk_ids_to_delete)} chunks deleted from ChromaDB and the file from MinIO."
         else:
             msg = "The file was deleted from MinIO, but no chunks were found in ChromaDB."
-            
+        
+        if is_file_processed(unique_file_id):
+            remove_processed_file(unique_file_id)
         print(msg)
         return {"status": "success", "message": msg}
 
@@ -470,9 +526,10 @@ async def chat_response(request: ChatRequest, context: bool = False):
             "1. NO EXTERNAL KNOWLEDGE: use only the provided fragments. If the context doesn't contain the answer, "
             "simply state that you don't know.\n"
             "2. CLARITY: be concise but clear. If the question is ambiguous, state that you don't understand and ask for clarification instead of guessing.\n"
-            "3. STRUCTURE: use bullet points or numbered lists for complex information if it is needed (like evaluation criteria or syllabus).\n"
+            "3. STRUCTURE: use bullet points or numbered lists for complex information only if it is needed (like evaluation criteria or syllabus).\n"
             "4. NO HALLUCINATIONS: do not invent dates, names of professors, or percentages if they are not explicitly in the context.\n"
-            "5. LANGUAGE: respond in the same language as the user's question.\n\n"
+            "5. LANGUAGE: respond in the same language as the user's question.\n"
+            "6. ANSWER: do not say 'based on the context...', '...in the documents provided...' or similar phrases. Just answer the question directly.\n\n"
             
             "CHAT HISTORY (for conversation flow):\n"
             "{chat_history}\n\n"

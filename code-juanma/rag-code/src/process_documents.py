@@ -15,13 +15,20 @@ def upload_all_guides():
         course_path = os.path.join(BASE_DIR, course_name)
         if not os.path.isdir(course_path):
             continue
-
+        
+        """if course_name == "Curso 2020_2021" or course_name == "Curso 2019_2020" or course_name == "Curso 2021_2022":
+            continue"""
+        
+        """if course_name = "Curso 2021_2022":
+            continue"""
+        
         print(f"\n--- PROCESSING COURSE: {course_name} ---")
 
         # List all items in the course directory (could be category folders or degree folders)
         content_in_course = os.listdir(course_path)
 
         for item in content_in_course:
+            
             item_path = os.path.join(course_path, item)
             if not os.path.isdir(item_path):
                 continue
@@ -55,6 +62,11 @@ def process_degree_folder(course, category, degree, path):
 
     print(f"\n- Sector: {course} > {category} > {degree}")
     print(f"* Documents: {total_files}")
+
+    """if degree == "Master Universitario en Inteligencia Artificial":
+        pass
+    else:
+        return"""
 
     for index, pdf in enumerate(pdf_files, start=1):
         file_path = os.path.join(path, pdf)

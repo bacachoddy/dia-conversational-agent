@@ -72,31 +72,45 @@ def delete_file_ui(selected_file_to_delete):
     if not selected_file_to_delete:
         return gr.update(), gr.update(), gr.update(), "Please select a file to delete."
 
-    try:
-        parts = selected_file_to_delete.replace("[", "").split("] ", 1)
-        course_part = parts[0]
-        
-        degree_and_file = parts[1].split(" - ", 1)
-        if len(degree_and_file) == 2:
-             degree_part = degree_and_file[0]
-             filename_part = degree_and_file[1]
-        else:
-             degree_part = "Unknown"
-             filename_part = parts[1]
+    deleted_files = []
+    errors = []
 
-        payload = {
-            "filename": filename_part,
-            "course": course_part,
-            "degree": degree_part
-        }
+    for selected_file in selected_file_to_delete:
+
+        filename_part = selected_file
+
+        try:
+            parts = filename_part.replace("[", "").split("] ", 1)
+            course_part = parts[0]
         
-        response = requests.post(f"{API_URL}/delete_file", data=payload)
-        response.raise_for_status()
+            degree_and_file = parts[1].split(" - ", 1)
+            if len(degree_and_file) == 2:
+                degree_part = degree_and_file[0]
+                filename_part = degree_and_file[1]
+            else:
+                degree_part = "Unknown"
+                filename_part = parts[1]
+
+            payload = {
+                "filename": filename_part,
+                "course": course_part,
+                "degree": degree_part
+            }
+            
+            response = requests.post(f"{API_URL}/delete_file", data=payload)
+            response.raise_for_status()
+            
+            deleted_files.append(filename_part)
         
-        return load_existing_files_ui() + (f"File deleted successfully: {filename_part}",)
-        
-    except Exception as e:
-        return gr.update(), gr.update(), gr.update(), f"Error connecting to backend: {e}"
+        except Exception as e:
+            errors.append(f"{filename_part} ({e})")
+
+    last_message = f"Files deleted ({len(deleted_files)}): {', '.join(deleted_files)}"
+    if errors:
+        last_message += f"\nErrors: {', '.join(errors)}"
+
+    return load_existing_files_ui() + (last_message,)
+
 
 def chat_response_ui(message, history, selected_courses, selected_degrees, session_id):
     """Bridge between ChatInterface and RAG backend."""
@@ -161,8 +175,8 @@ with gr.Blocks(title="RAG DIA") as demo:
             status_msg = gr.Textbox(label="Status", interactive=False)
             
             gr.Markdown("### Delete files")
-            file_to_delete_dropdown = gr.Dropdown(label="Select file to delete", choices=[])
-            delete_btn = gr.Button("Delete selected file", variant="stop")
+            file_to_delete_dropdown = gr.Dropdown(label="Select files to delete", choices=[], multiselect=True)
+            delete_btn = gr.Button("Delete selected files", variant="stop")
             delete_status_msg = gr.Textbox(label="Status", interactive=False)
 
             gr.Markdown("### 2. Context active")
@@ -214,7 +228,7 @@ with gr.Blocks(title="RAG DIA") as demo:
         outputs=[course_selector, degree_selector, file_to_delete_dropdown]
     )
 
-    # Cascaded update: When course changes, update degrees
+    # Cascaded update, when course changes, update degrees
     course_selector.change(
         fn=update_degree_dropdown,
         inputs=[course_selector],

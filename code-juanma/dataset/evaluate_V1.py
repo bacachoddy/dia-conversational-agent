@@ -24,15 +24,14 @@ from ragas.metrics import (
 )
 
 
-ollama_url = "http://100.71.243.90:5000"
+ollama_url = "http://100.64.190.89:11434"
 
 custom_http_client = httpx.Client(timeout=1200.0)
 custom_async_client = httpx.AsyncClient(timeout=1200.0)
 
-
 # Base models
 base_llm = ChatOpenAI(
-    model="qwen3.5:35b", 
+    model="qwen2.5:32b", 
     base_url=f"{ollama_url}/v1",
     api_key="not_required",
     temperature=0,
@@ -138,6 +137,6 @@ if __name__ == "__main__":
 
     run_evaluation(
         dataset_path="datasets/rag_dataset_v3_gemma4_26b.json",
-        output_csv="evaluation_results.csv",
+        output_csv="evaluation_results_V1.csv",
         sample_percentage=0.10
     )
