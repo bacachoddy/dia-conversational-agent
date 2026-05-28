@@ -63,14 +63,14 @@ class QADataset(BaseModel):
 
 llm_extractor = ChatOpenAI(
     model="qwen2.5:32b",
-    base_url="http://100.84.51.82:5000/v1",
+    base_url="http://100.119.72.127:11434/v1",
     api_key="not_required",
     temperature=0.1
 )
 
 llm_generator = ChatOpenAI(
     model="qwen2.5:32b",
-    base_url="http://100.84.51.82:5000/v1",
+    base_url="http://100.119.72.127:11434/v1",
     api_key="not_required",
     temperature=0.7
 )
@@ -78,6 +78,13 @@ llm_generator = ChatOpenAI(
 # ==========================================
 # 3. PIPELINE FUNCTIONS
 # ==========================================
+
+Q_TYPE_DISTRIBUTION = {
+    "Factual": 0.45,
+    "Summarization": 0.30,
+    "Multi-hop Reasoning": 0.15,
+    "Unanswerable": 0.10,
+}
 
 def _parse_json_response(text: str) -> dict:
     text = re.sub(r"```json\s*", "", text)
@@ -132,11 +139,24 @@ El JSON debe tener exactamente estas claves:
 def generate_questions(schema: CourseGuideSchema, course_name: str, num_questions: int = 20) -> QADataset:
     """Generates diverse Q&A pairs based on the extracted schema."""
     print(f"-> Generating a diverse dataset of {num_questions} questions...")
+    
+    # Calcular distribución
+    type_counts = {
+        q_type: max(1, round(num_questions * prob))
+        for q_type, prob in Q_TYPE_DISTRIBUTION.items()
+    }
+    
+    distribution_str = "\n".join([
+        f"    - {q_type}: {count} preguntas"
+        for q_type, count in type_counts.items()
+    ])
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", """Eres un simulador avanzado de estudiantes universitarios.
 
     Genera {num_questions} pares de pregunta y respuesta basados en los datos de la asignatura "{course_name}".
+    DISTRIBUCIÓN OBLIGATORIA DE PREGUNTAS (debes respetar exactamente estos números):
+    {distribution_str}
 
     REQUISITO DE IDIOMA: Todo en español.
 
@@ -145,11 +165,20 @@ def generate_questions(schema: CourseGuideSchema, course_name: str, num_question
         Ejemplo correcto: "¿Cuál es la bibliografía básica de {course_name}?"
         Ejemplo incorrecto: "¿Cuál es la bibliografía básica del curso?"
 
+    Taxonomía de tipo de pregunta:
+    1. Factual: Hecho de un solo paso explícitamente indicado en el texto
+    2. Summarization: Requiere sintetizar o agrupar múltiples elementos de información.
+    3. Multi-hop Reasoning: Requiere combinar información de diferentes partes del documento para inferir la respuesta.
+    4. Unanswerable: La pregunta no puede ser respondida con el contexto proporcionado.
+
+
     REGLAS PARA ground_truth (MUY IMPORTANTE):
     - Debe ser una respuesta COMPLETA y AUTOCONTENIDA: alguien que solo lea el ground_truth debe entender la respuesta sin necesitar contexto adicional.
-    - Para preguntas Factual simples (créditos, profesor, fecha): 1-2 frases con el dato exacto.
-    - Para preguntas Summarization y Multi-hop: incluye TODOS los elementos relevantes sin omitir ninguno.
+    - Debe contener todos los hechos clave necesarios para evaluar una respuesta de RAG (fechas, porcentajes, nombres, condiciones).
+    - NUNCA copies códigos en bruto ni texto de tablas del contexto (por ejemplo, '14, 3 = ...' o 'ASI Natura 103000361').
+    - NUNCA uses 'sí', 'no' o palabras sueltas como respuesta.
     - Debe ser CONCISA pero INFORMATIVA con los datos exactos (nombres, porcentajes, fechas, créditos).
+    - Escribe siempre en prosa continua. NUNCA uses bullet points, listas numeradas ni markdown.
     - NUNCA uses frases vagas como "se puede encontrar en...", "el curso incluye...", "hay información sobre...".
     - SIEMPRE incluye los datos concretos del schema.
     
@@ -165,15 +194,12 @@ def generate_questions(schema: CourseGuideSchema, course_name: str, num_question
     - NO reformular, NO añadir información.
     - Debe poder encontrarse con CTRL+F en el texto original.
 
-
-    TAXONOMÍA:
-    1. Factual
-    2. Summarization
-    3. Multi-hop Reasoning
-    4. Unanswerable (máximo 3)
+    - student_profile: Perfil del estudiante que haría esta pregunta 
+    (ej: "estudiante de primer año", "estudiante en periodo de matrícula", 
+    "estudiante preparando el TFM")
 
     Para preguntas Unanswerable:
-    - ground_truth: explicación natural
+    - ground_truth: No lo se
     - ground_truth_context: "No disponible en el documento"
 
     FORMATO JSON:
@@ -197,7 +223,8 @@ def generate_questions(schema: CourseGuideSchema, course_name: str, num_question
     result = chain.invoke({
         "num_questions": num_questions,
         "schema_json": schema_json,
-        "course_name": course_name
+        "course_name": course_name,
+        "distribution_str": distribution_str
     })
     raw = result.content if hasattr(result, "content") else str(result)
 
@@ -214,44 +241,131 @@ def clean_course_name(raw: str) -> str:
 # ==========================================
 
 if __name__ == "__main__":
-    pdf_path = "/home/alvaro/Escritorio/Guías aprendizaje/Curso 2020:2021/Grado/Grado en Ingeneiría Informática/"
     NUM_QUESTIONS = 20
 
-    # A. Load PDF and export to Markdown via DoclingLoader (no verbalization)
-    print(f"-> Loading PDF: {pdf_path}")
+    # ==========================================
+    # 0. DIRECTORIO DEL SCRIPT (ROBUSTO)
+    # ==========================================
     try:
-        loader = DoclingLoader(
-            file_path=pdf_path,
-            export_type=ExportType.DOC_CHUNKS,  # Exporta como chunks de texto (puede ajustar según el formato del PDF)
-        )
-        docs = loader.load()
-        full_text = "\n".join([doc.page_content for doc in docs])
+        script_dir = Path(__file__).resolve().parent
+    except NameError:
+        script_dir = Path.cwd()
+
+    print(f"📁 Guardando resultados en: {script_dir}")
+
+    # ==========================================
+    # 1. LISTA MANUAL DE PDFs
+    # ==========================================
+    pdf_files = [
+        Path("/home/alvaro/Escritorio/Guías aprendizaje/Curso 2020:2021/Grado/Grado en Ingeneiría Informática/Sistemas de Planificación.pdf"),
+        Path("/home/alvaro/Escritorio/Guías aprendizaje/Curso 2020:2021/Grado/Grado en Ingeneiría Informática/Probabilidades y Estadística II.pdf"),
+        Path("/home/alvaro/Escritorio/Guías aprendizaje/Curso 2020:2021/Grado/Grado en Ingeneiría Informática/Investigación Operativa.pdf"),
+        Path("/home/alvaro/Escritorio/Guías aprendizaje/Curso 2020:2021/Grado/Grado en Ingeneiría Informática/Lógica.pdf"),
+        Path("/home/alvaro/Escritorio/Guías aprendizaje/Curso 2020:2021/Grado/Grado en Ingeneiría Informática/Minería de Datos.pdf"),
+        Path("/home/alvaro/Escritorio/Guías aprendizaje/Curso 2020:2021/Grado/Grado en Ingeneiría Informática/Programación Declarativa, Lógica y Restricciones.pdf"),
+        Path("/home/alvaro/Escritorio/Guías aprendizaje/Curso 2020:2021/Grado/Grado en Ingeneiría Informática/Reconocimiento de Formas.pdf"),
+    ]
+
+    print(f"📂 Procesando {len(pdf_files)} documentos...")
+
+    all_datasets = []
+
+    # ==========================================
+    # 2. LOOP PRINCIPAL
+    # ==========================================
+    for pdf_path in pdf_files:
+
+        print(f"\n==============================")
+        print(f"📄 Procesando: {pdf_path.name}")
+        print(f"==============================")
+
+        if not pdf_path.exists():
+            print(f"❌ No existe: {pdf_path}")
+            continue
+
+        # ------------------------------------------
+        # A. LOAD
+        # ------------------------------------------
+        try:
+            loader = DoclingLoader(
+                file_path=str(pdf_path),
+                export_type=ExportType.DOC_CHUNKS,
+            )
+            docs = loader.load()
+            full_text = "\n".join([doc.page_content for doc in docs])
+        except Exception as e:
+            print(f"❌ Error loading PDF: {e}")
+            continue
+
+        print(f"\n--- TEXT PREVIEW (first 500 chars) ---")
+        print(full_text[:500])
+
+        # ------------------------------------------
+        # B. EXTRACT SCHEMA
+        # ------------------------------------------
+        try:
+            extracted_schema = extract_schema(full_text)
+        except Exception as e:
+            print(f"❌ Error extracting schema: {e}")
+            continue
+
+        print("\n--- EXTRACTED SCHEMA ---")
+        print(extracted_schema.model_dump_json(indent=2))
+
+        # ------------------------------------------
+        # C. GENERATE DATASET
+        # ------------------------------------------
+        try:
+            course_name = clean_course_name(extracted_schema.course_name)
+
+            dataset = generate_questions(
+                extracted_schema,
+                course_name=course_name,
+                num_questions=NUM_QUESTIONS
+            )
+        except Exception as e:
+            print(f"❌ Error generating dataset: {e}")
+            continue
+
+        # Añadir source_document
+        for pair in dataset.questions:
+            pair.source_document = pdf_path.name
+
+        # ------------------------------------------
+        # D. GUARDAR DATASET INDIVIDUAL
+        # ------------------------------------------
+        single_output = script_dir / f"dataset_{pdf_path.stem}.json"
+
+        single_data = {
+            "source_document": pdf_path.name,
+            "course_name": course_name,
+            "num_questions": len(dataset.questions),
+            "questions": [q.model_dump() for q in dataset.questions]
+        }
+
+        try:
+            with open(single_output, "w", encoding="utf-8") as f:
+                json.dump(single_data, f, ensure_ascii=False, indent=4)
+
+            print(f"💾 Guardado individual: {single_output}")
+        except Exception as e:
+            print(f"❌ Error guardando individual: {e}")
+            continue
+
+        # Añadir al global
+        all_datasets.append(single_data)
+
+    # ==========================================
+    # 3. GUARDAR DATASET GLOBAL
+    # ==========================================
+    global_output = script_dir / "dataset_global.json"
+
+    try:
+        with open(global_output, "w", encoding="utf-8") as f:
+            json.dump(all_datasets, f, ensure_ascii=False, indent=4)
+
+        print(f"\n🎉 Dataset global guardado en: {global_output}")
+        print(f"📊 Total datasets generados: {len(all_datasets)}")
+
     except Exception as e:
-        print(f"Error loading PDF: {e}")
-        full_text = ""
-
-
-        
-    print(f"\n--- MARKDOWN TEXT (first 1000 chars) ---")
-    print(full_text[:1000])
-
-    # B. Extract schema
-    extracted_schema = extract_schema(full_text)
-    print("\n--- EXTRACTED SCHEMA ---")
-    print(extracted_schema.model_dump_json(indent=2))
-
-    # C. Generate Q&A dataset
-    course_name = clean_course_name(extracted_schema.course_name)
-    final_dataset = generate_questions(extracted_schema, course_name=course_name, num_questions=NUM_QUESTIONS)
-    
-    pdf_filename = Path(pdf_path).name  # extrae solo el nombre del archivo PDF
-
-    for pair in final_dataset.questions:
-        pair.source_document = pdf_filename
-
-    # D. Save results
-    output_file = "dataset_baseline_7.json"
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(final_dataset.model_dump(), f, ensure_ascii=False, indent=4)
-
-    print(f"\n Done! Generated {len(final_dataset.questions)} questions → '{output_file}'")
+        print(f"❌ Error guardando dataset global: {e}")
