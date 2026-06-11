@@ -59,7 +59,6 @@ Solo es necesario ejecutarlo una vez. Los datos persisten entre reinicios.
 ## Características
 
 - **RAG-Fusion + Multi-Query**: genera 5 variantes de cada pregunta y fusiona los resultados con Reciprocal Rank Fusion para mejorar la recuperación.
-- **Historial de conversación**: mantiene los últimos 10 turnos para resolver referencias contextuales.
 - **Metadata jerárquica**: los documentos se indexan por curso, categoría y titulación, permitiendo filtros precisos.
 - **Selector en cascada**: interfaz con selección Curso → Titulación → Documento.
 - **Inspector de chunks**: visualiza los fragmentos exactos usados en la última respuesta.
