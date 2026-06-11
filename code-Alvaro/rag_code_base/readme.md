@@ -1,65 +1,107 @@
-# Proyecto
+# RAG Code Base
 
-- Se ha incorporado una arquitectura modular, separando el frontend y el backend mediante una API desarrollada con FastAPI.
-- Se ha implementado ChromaDB ejecutándose en un contenedor Docker.
-- Se ha añadido el endpoint `list_documents`, que permite visualizar los documentos procesados y almacenados en ChromaDB.
+Este directorio contiene el RAG utilizado en el **Experimento 1: Verbalización de tablas en un sistema RAG** para trabajar con los **documentos originales**.
 
+Su función es servir como sistema base de comparación frente a `rag_code_verb`, que utiliza los documentos verbalizados.
 
+```text
+rag_code_base → PDFs originales
+rag_code_verb → PDFs verbalizados
+```
 
----
+## Configuración del experimento
 
-# Ejecución del Proyecto
+```text
+RAG: rag_code_base
+Documentos utilizados: PDFs originales
+Puerto de ChromaDB: 8002
+Collection name: basic_rag_2
+Backend/API: http://localhost:9000
+Frontend: http://127.0.0.1:7860/
+```
+## Requisitos
 
-## 1. Iniciar el backend
+Antes de ejecutar el RAG, es necesario tener instalados los siguientes componentes:
 
-Desde la carpeta raíz del proyecto, ejecutar:
+```text
+Python >= 3.10
+Docker instalado y corriendo
+pip
+```
+
+Además, se recomienda utilizar un entorno virtual de Python para aislar las dependencias del proyecto.
+
+El sistema necesita tener ChromaDB en ejecución mediante Docker antes de arrancar el backend, ya que la base vectorial se utiliza para almacenar y recuperar los documentos indexados.
+
+También es necesario disponer de acceso al servidor donde se encuentran desplegados el modelo de lenguaje y el modelo de embeddings utilizados por el RAG. En caso de ejecutar el sistema en otro entorno, se deben revisar y modificar las URLs correspondientes dentro del código.
+
+## Ejecución
+
+### 1. Crear entorno virtual e instalar dependencias
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Levantar ChromaDB
+
+Desde la carpeta donde esté el `docker-compose.yml`:
+
+```bash
+docker compose up -d
+```
+
+Para detenerlo:
+
+```bash
+docker compose down
+```
+
+### 3. Lanzar el backend
+
+Desde la carpeta raíz del proyecto:
 
 ```bash
 uvicorn backend.main:app --reload --port 9000
 ```
 
-Para acceder a la Api:
+La API estará disponible en:
 
-```
+```text
 http://localhost:9000/docs
 ```
 
----
-
-## 2. Iniciar el frontend
-
-Acceder a la carpeta `frontend` y ejecutar:
+### 4. Lanzar el frontend
 
 ```bash
+cd frontend
 python3 app.py
 ```
-acceder a la interfaz
 
+La interfaz estará disponible en:
+
+```text
+http://127.0.0.1:7860/
 ```
- http://127.0.0.1:7860/
- ```
----
 
+## Uso en el Experimento 1
 
-## 3. Requisitos
+Una vez levantado el sistema, se debe realizar la ingesta de los PDFs originales mediante el script:
 
-- LM Studio, el LLM esta corriendo en local (llama-3.2-3b-instruct) con el servidor en http://127.0.0.1:1234
-- Correr chromadb en docker
+```text
+experiment_verbalize/upload_docs.py
+```
 
-## 4. Recomendado utilizar entorno virtual
+Después, la evaluación se lanza desde:
 
-Crear entorno virtual en python
+```text
+experiment_verbalize/
+```
+
+con:
 
 ```bash
-python3 -m venv venv
-```
-Acceder al entorno virtual
-
-```bash
-source venv/bin/activate
-```
-Instalar todas las dependencias del proyecto
-
-```bash
-pip install -r requirements.txt
+python run_evaluation.py
 ```
