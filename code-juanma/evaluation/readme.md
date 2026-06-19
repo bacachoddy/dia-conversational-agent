@@ -27,9 +27,9 @@ El sistema de evaluación calcula las siguientes métricas de rendimiento y segu
 * `h1c/`: experimentos de la ingeniería de prompts.
 * `h2/`: experimentos del impacto de los LLMs.
 
-En cada carpeta, estan las carpetas: 
+En cada carpeta, se encuentran las siguientes subcarpetas: 
 - `datasets/`: conjunto de datos para la evaluación.
 - `results/`: resultados de la evaluación. Están tanto los archivos de cada evaluación como las medias de cada archivo para cada métrica. Además, hay dos archivos de python:
     - `mean.py`: calcula las medias de cada métrica para cada archivo.
     - `results.py`: crea un fichero csv que agrupa las medias calculadas.
-    - `results_taxonomy.py`: crea un fichero csv que agrupa las medias calculadas por taxonomía.
+    - `results_taxonomy.py`: crea un fichero csv que agrupa las medias calculadas por taxonomía (no está en el experimento h1a debido a su poca relevancia).
