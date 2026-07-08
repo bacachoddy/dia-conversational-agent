@@ -193,21 +193,36 @@ La respuesta se valida mediante structured output (Pydantic `QAPair.model_valida
 
 ## 6. Versiones del dataset producido (Guía 15, §5.8)
 
-| Archivo | LLM generador | Descripción |
-|---------|--------------|-------------|
-| `datasets/rag_dataset_v1.json` | — | Primera versión básica |
-| `datasets/rag_dataset_v2.json` | — | Segunda versión con mejoras de esquema |
-| `datasets/rag_dataset_v3_qwen2.5_32b.json` | qwen2.5:32b | V3 con qwen2.5 32B como generador |
-| `datasets/rag_dataset_v3_gemma3_27b.json` | gemma3:27b | V3 con gemma3 27B como generador |
-| `datasets/rag_dataset_v3_deepseek_r1_32b.json` | deepseek-r1:32b | V3 con DeepSeek R1 32B |
-| `datasets/rag_dataset_v3_llama_3-1_8b.json` | llama3.1:8b | V3 con LLaMA 3.1 8B |
-| `datasets/rag_dataset_v3_ministral_3_14b.json` | ministral-3:14b | V3 con Ministral 3 14B |
-| `datasets/rag_dataset_v3_gemma4_26b.json` (principal) | gemma4:26b | Dataset final seleccionado para evaluación |
-| `code-andre/dataset/rag_dataset_humanized_v1.json` | Manual | Dataset humanizado manualmente (ver §7) |
+### 6.1 Evolución de esquemas (v1 → v2 → v3)
 
-### 6.1 Dataset seleccionado para el experimento principal
+| Versión | Cambio principal |
+|---------|-----------------|
+| v1 | Esquema mínimo: `question`, `answer`, `contexts`, `ground_truth`. Sin metadatos de trazabilidad ni taxonomía de tipos. |
+| v2 | Añadidos: `source_document`, `chunk_id`, `question_type` (primeros tipos). Aún sin `topic`, `difficulty`, `reference_contexts`, `language`. |
+| v3 | Esquema completo con Pydantic (`QAPair`): todos los campos tipados, validados y enumerados. Añade `reference_contexts` (chunks de referencia para evaluación RAGAS), `topic`, `difficulty`, `language`. Múltiples LLMs evaluados como generadores. |
 
-El dataset `rag_dataset_v3_octen_qwen2.5_V2.json` (generado con qwen2.5:32b) fue seleccionado como dataset base *original* para el experimento de humanización, por ofrecer la mejor calidad de preguntas según evaluación cualitativa del equipo.
+### 6.2 LLMs de generación probados en v3 y razón de selección
+
+Para la v3 se probaron sistemáticamente varios LLMs como generadores, todos disponibles en el clúster universitario vía Ollama. Los criterios de evaluación fueron: naturalidad de las preguntas generadas, coherencia del ground truth con el chunk de referencia, y distribución correcta de tipos de pregunta:
+
+| Archivo | LLM generador | Parámetros | Evaluación cualitativa | ¿Elegido? |
+|---------|--------------|-----------|----------------------|-----------|
+| `rag_dataset_v3_llama_3-1_8b.json` | llama3.1:8b | 8B | Preguntas correctas pero genéricas. Ground truth demasiado corto y poco informativo. Dificultad concentrada en "easy". | No — calidad insuficiente para evaluación RAGAS robusta |
+| `rag_dataset_v3_qwen2.5_14b.json` | qwen2.5:14b | 14B | Mejora notable sobre 8B. Algunas preguntas `out_of_scope` eran demasiado obvias (fáciles de detectar). | No — la versión 32B es superior y disponible en el clúster |
+| `rag_dataset_v3_qwen2.5_32b.json` | qwen2.5:32b | 32B | Preguntas naturales y bien calibradas. Ground truth detallado. Buena distribución de dificultades. | **Sí — base del dataset original del experimento de humanización** |
+| `rag_dataset_v3_ministral_3_14b.json` | ministral-3:14b | 14B | Tendencia a generar preguntas muy similares entre sí (poca diversidad). Fallo frecuente en el campo `language` (mezcla es/en). | No — baja diversidad y errores de validación |
+| `rag_dataset_v3_deepseek_r1_32b.json` | deepseek-r1:32b | 32B | Alta calidad de razonamiento, pero incluye "chain of thought" en el ground truth (explicaciones largas que no son respuestas directas). Incompatible con el formato esperado por RAGAS. | No — formato de respuesta inadecuado para RAGAS |
+| `rag_dataset_v3_qwen3.5_9b.json` | qwen3.5:9b | 9B | Similar a llama3.1:8b en limitaciones. Menor calidad que qwen2.5:32b de la misma familia. | No |
+| `rag_dataset_v3_qwen3.5_35b.json` | qwen3.5:35b | 35B | Calidad comparable a qwen2.5:32b. Tiempo de generación mayor. No aporta ventaja suficiente. | No — sin ventaja sobre qwen2.5:32b |
+| `rag_dataset_v3_gemma3_27b.json` | gemma3:27b | 27B | Buena calidad general. Ocasionalmente mezcla idiomas en preguntas largas. | No — qwen2.5:32b más consistente |
+| `rag_dataset_v3_gemma4_26b.json` | gemma4:26b | 26B | Alta calidad, preguntas muy naturales. Usado en algunos experimentos de Juanma. | Parcial — utilizado en experimentos alternativos de Juanma |
+| `code-andre/dataset/rag_dataset_humanized_v1.json` | Manual | — | Humanización manual del dataset qwen2.5:32b (ver §7) | **Sí — dataset humanizado del experimento de solidez** |
+
+### 6.3 Dataset seleccionado para el experimento de humanización
+
+El dataset `rag_dataset_v3_octen_qwen2.5_V2.json` (generado con qwen2.5:32b, con respuestas obtenidas usando la configuración Octen del RAG) fue seleccionado como dataset base *original* para el experimento de humanización. La razón de elección sobre otros datasets v3 fue la combinación de:
+- Mejor calidad de generación entre los LLMs probados (ver tabla anterior)
+- Respuestas RAG obtenidas con la configuración de mayor recall (Octen), lo que maximiza la información disponible en los contextos para las métricas RAGAS
 
 ---
 
@@ -235,3 +250,4 @@ El dataset humanizado (`rag_dataset_humanized_v1.json`) se generó manualmente a
 ---
 
 *Para la documentación del sistema de evaluación que consume estos datasets, ver [04_evaluadores_documentacion_tecnica.md](04_evaluadores_documentacion_tecnica.md).*
+
